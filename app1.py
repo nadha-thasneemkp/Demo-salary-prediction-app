@@ -23,19 +23,8 @@ model = joblib.load(os.path.join(BASE_DIR, "salary_model.pkl"))
 skill_cols = joblib.load(os.path.join(BASE_DIR, "skill_cols.pkl"))
 rmse = float(joblib.load(os.path.join(BASE_DIR, "rmse.pkl")))
 
-df_model = None
-results_df = None
-
-try:
-    df_model = pd.read_csv(os.path.join(BASE_DIR, "df_model.csv"))
-except Exception:
-    df_model = None
-
-try:
-    results_df = pd.read_csv(os.path.join(BASE_DIR, "results_df.csv"))
-except Exception:
-    results_df = None
-
+df_model = pd.read_csv(os.path.join(BASE_DIR, "df_model.csv"))
+results_df = pd.read_csv(os.path.join(BASE_DIR, "results_df.csv"))
 
 # ============================================================
 # Safe reset mechanism
@@ -288,4 +277,5 @@ if predict_btn:
 # ============================================================
 if st.session_state.did_predict and df_model is not None:
     st.pyplot(plot_salary_vs_experience(df_model))
+
     st.pyplot(plot_avg_salary_by_role(df_model))
