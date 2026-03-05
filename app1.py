@@ -5,7 +5,7 @@ import joblib
 import re
 import matplotlib.pyplot as plt
 import os
-
+st.write("✅ APP VERSION: DASHBOARD v2 (", __file__, ")")
 # ============================================================
 # Page config
 # ============================================================
@@ -279,3 +279,4 @@ if st.session_state.did_predict and df_model is not None:
     st.pyplot(plot_salary_vs_experience(df_model))
 
     st.pyplot(plot_avg_salary_by_role(df_model))
+
