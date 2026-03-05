@@ -5,29 +5,42 @@ import joblib
 import re
 import matplotlib.pyplot as plt
 import os
-st.write("✅ APP VERSION: DASHBOARD v2 (", __file__, ")")
+
 # ============================================================
 # Page config
 # ============================================================
 st.set_page_config(page_title="AI Salary Prediction Dashboard", layout="wide")
 
 # ============================================================
-# Safe base directory (important for Streamlit Cloud)
+# Safe base directory (Cloud-safe)
 # ============================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# OPTIONAL debug (remove later)
+# st.write(f"✅ APP VERSION: DASHBOARD v3 ({__file__})")
+
 # ============================================================
-# Load artifacts safely
+# Load artifacts (Cloud-safe)
 # ============================================================
 model = joblib.load(os.path.join(BASE_DIR, "salary_model.pkl"))
 skill_cols = joblib.load(os.path.join(BASE_DIR, "skill_cols.pkl"))
 rmse = float(joblib.load(os.path.join(BASE_DIR, "rmse.pkl")))
 
-df_model = pd.read_csv(os.path.join(BASE_DIR, "df_model.csv"))
-results_df = pd.read_csv(os.path.join(BASE_DIR, "results_df.csv"))
+# Load CSVs (optional – app still runs if missing)
+df_model = None
+results_df = None
+try:
+    df_model = pd.read_csv(os.path.join(BASE_DIR, "df_model.csv"))
+except Exception:
+    df_model = None
+
+try:
+    results_df = pd.read_csv(os.path.join(BASE_DIR, "results_df.csv"))
+except Exception:
+    results_df = None
 
 # ============================================================
-# Safe reset mechanism
+# Safe reset mechanism (IMPORTANT)
 # ============================================================
 RESET_KEYS = [
     "age_text", "exp_text", "usd_to_inr",
@@ -35,7 +48,7 @@ RESET_KEYS = [
     "skills_selected",
     "pred", "low", "high", "pred_inr", "low_inr", "high_inr",
     "recognized", "ignored",
-    "did_predict"
+    "did_predict",
 ]
 
 if "do_reset" not in st.session_state:
@@ -50,7 +63,6 @@ if st.session_state.do_reset:
 
 if "did_predict" not in st.session_state:
     st.session_state.did_predict = False
-
 
 # ============================================================
 # Styling
@@ -84,7 +96,6 @@ section[data-testid="stSidebar"] div[data-baseweb="select"] > div{
     background:white !important;
     border-radius:10px !important;
 }
-
 section[data-testid="stSidebar"] div[data-baseweb="select"] span{
     color:black !important;
     font-size:17px !important;
@@ -111,8 +122,8 @@ section[data-testid="stSidebar"] button{
     border-radius:14px;
     padding:16px;
     box-shadow:0 8px 20px rgba(0,0,0,0.08);
+    height:100%;
 }
-
 .kpi .label{ font-size:13px; color:#475569; font-weight:800; }
 .kpi .value{ font-size:30px; font-weight:900; color:#0f172a; }
 
@@ -124,7 +135,6 @@ section[data-testid="stSidebar"] button{
     font-size:19px;
     font-weight:800;
 }
-
 .skillbox-warn{
     background: linear-gradient(180deg,#fffbeb,#fde68a);
     border:2px solid #f59e0b;
@@ -133,14 +143,17 @@ section[data-testid="stSidebar"] button{
     font-size:19px;
     font-weight:800;
 }
-
+.skillbox-ok h4, .skillbox-warn h4{
+    margin: 0 0 10px 0;
+    font-size:20px;
+    font-weight:900;
+}
 .small{ color:#334155; font-size:13px; }
 </style>
 """, unsafe_allow_html=True)
 
-
 # ============================================================
-# Helper functions
+# Helpers
 # ============================================================
 SKILL_CANONICAL = {
     "sql": "SQL",
@@ -152,26 +165,26 @@ SKILL_CANONICAL = {
     "dl": "Deep Learning",
 }
 
-def normalize_job_title(t):
+def normalize_job_title(t: str) -> str:
     t = str(t).strip()
     t = re.sub(r"\s+", " ", t)
     return t.title()
 
-def normalize_skill_name(s):
+def normalize_skill_name(s: str) -> str:
     s2 = str(s).strip()
     low = s2.lower()
     return SKILL_CANONICAL.get(low, s2)
-
 
 # ============================================================
 # Graphs
 # ============================================================
 def plot_salary_vs_experience(df):
+    # expects columns: Years of Experience, Salary
     tmp = df.copy()
     tmp["Years of Experience"] = tmp["Years of Experience"].round().astype(int)
     grp = tmp.groupby("Years of Experience")["Salary"].median().reset_index()
 
-    fig = plt.figure(figsize=(7,4))
+    fig = plt.figure(figsize=(7, 4))
     plt.plot(grp["Years of Experience"], grp["Salary"])
     plt.title("Median Salary vs Experience")
     plt.xlabel("Years of Experience")
@@ -179,24 +192,81 @@ def plot_salary_vs_experience(df):
     plt.tight_layout()
     return fig
 
-
-def plot_avg_salary_by_role(df):
-    grp = df.groupby("Job Title")["Salary"].mean().sort_values(ascending=False).head(10)
-
-    fig = plt.figure(figsize=(7,4))
+def plot_avg_salary_by_role(df, top_n=10):
+    # expects columns: Job Title, Salary
+    grp = df.groupby("Job Title")["Salary"].mean().sort_values(ascending=False).head(top_n)
+    fig = plt.figure(figsize=(7, 4))
     plt.bar(grp.index, grp.values)
-    plt.title("Average Salary by Role")
+    plt.title(f"Average Salary by Role (Top {top_n})")
+    plt.ylabel("Average Salary")
     plt.xticks(rotation=30, ha="right")
     plt.tight_layout()
     return fig
 
+def plot_feature_importance(pipeline_model, top_n=15):
+    try:
+        preprocess = pipeline_model.named_steps["preprocess"]
+        m = pipeline_model.named_steps["model"]
+        feat_names = preprocess.get_feature_names_out()
+        importances = getattr(m, "feature_importances_", None)
+
+        fig = plt.figure(figsize=(7.5, 4.8))
+        if importances is None:
+            plt.text(0.05, 0.5, "Feature importance not available for this model.", fontsize=12)
+            plt.axis("off")
+            plt.tight_layout()
+            return fig
+
+        importances = np.array(importances)
+        idx = np.argsort(importances)[::-1][:top_n]
+
+        plt.barh(range(len(idx))[::-1], importances[idx][::-1])
+        plt.yticks(range(len(idx))[::-1], [str(feat_names[i]) for i in idx][::-1], fontsize=9)
+        plt.title(f"Top {top_n} Feature Importances")
+        plt.xlabel("Importance")
+        plt.tight_layout()
+        return fig
+    except Exception:
+        fig = plt.figure(figsize=(7, 4))
+        plt.text(0.05, 0.5, "Could not compute feature importance (pipeline mismatch).", fontsize=12)
+        plt.axis("off")
+        plt.tight_layout()
+        return fig
+
+def plot_model_comparison(results_df):
+    fig = plt.figure(figsize=(7.2, 4.2))
+    if results_df is None or len(results_df) == 0:
+        plt.text(0.05, 0.5, "Place results_df.csv in folder to show model comparison.", fontsize=12)
+        plt.axis("off")
+        plt.tight_layout()
+        return fig
+
+    dfp = results_df.copy()
+    if "val_R2" in dfp.columns:
+        dfp = dfp.sort_values("val_R2", ascending=False)
+        plt.bar(dfp["model"], dfp["val_R2"])
+        plt.ylim(0, 1.0)
+        plt.title("Model Comparison (Validation R²)")
+        plt.ylabel("Validation R²")
+        plt.xticks(rotation=30, ha="right")
+    elif "val_RMSE" in dfp.columns:
+        dfp = dfp.sort_values("val_RMSE", ascending=True)
+        plt.bar(dfp["model"], dfp["val_RMSE"])
+        plt.title("Model Comparison (Validation RMSE)")
+        plt.ylabel("Validation RMSE")
+        plt.xticks(rotation=30, ha="right")
+    else:
+        plt.text(0.05, 0.5, "results_df.csv must contain columns: model + (val_R2 or val_RMSE).", fontsize=12)
+        plt.axis("off")
+
+    plt.tight_layout()
+    return fig
 
 # ============================================================
 # Header
 # ============================================================
 st.title("AI Salary Prediction Dashboard")
-st.write('<div class="small">Predict salary and visualize insights.</div>', unsafe_allow_html=True)
-
+st.write('<div class="small">Predict annual salary (USD) and show INR conversion. Graphs appear after prediction.</div>', unsafe_allow_html=True)
 
 # ============================================================
 # Sidebar Inputs
@@ -204,8 +274,8 @@ st.write('<div class="small">Predict salary and visualize insights.</div>', unsa
 with st.sidebar:
     st.subheader("User Inputs")
 
-    gender_options = ["Select Gender","Male","Female","Other"]
-    edu_options = ["Select Education","High School","Bachelor","Master","PhD"]
+    gender_options = ["Select Gender", "Male", "Female", "Other"]
+    edu_options = ["Select Education", "High School", "Bachelor", "Master", "PhD"]
 
     if df_model is not None and "Job Title" in df_model.columns:
         job_titles = sorted(df_model["Job Title"].dropna().unique())
@@ -213,70 +283,179 @@ with st.sidebar:
     else:
         job_options = ["Select Job Title"]
 
-    with st.form("predict_form"):
+    with st.form("predict_form", clear_on_submit=False):
+        age_text = st.text_input("Age", placeholder="Enter Age", key="age_text")
+        gender_sel = st.selectbox("Gender", gender_options, key="gender_sel")
+        edu_sel = st.selectbox("Education", edu_options, key="edu_sel")
+        job_sel = st.selectbox("Job Title", job_options, key="job_sel")
+        exp_text = st.text_input("Years of Experience", placeholder="Enter Experience (e.g., 3 or 3.5)", key="exp_text")
 
-        age_text = st.text_input("Age",key="age_text")
-        gender_sel = st.selectbox("Gender",gender_options,key="gender_sel")
-        edu_sel = st.selectbox("Education",edu_options,key="edu_sel")
-        job_sel = st.selectbox("Job Title",job_options,key="job_sel")
-        exp_text = st.text_input("Years of Experience",key="exp_text")
+        st.multiselect("Select Skills (multiple)", options=sorted(skill_cols), key="skills_selected")
+        usd_to_inr = st.number_input("USD → INR Rate", value=83.0, key="usd_to_inr")
 
-        st.multiselect("Select Skills",options=sorted(skill_cols),key="skills_selected")
-        usd_to_inr = st.number_input("USD → INR Rate",value=83.0,key="usd_to_inr")
-
-        predict_btn = st.form_submit_button("Predict")
-        reset_btn = st.form_submit_button("Reset")
+        c1, c2 = st.columns(2)
+        with c1:
+            predict_btn = st.form_submit_button("Predict")
+        with c2:
+            reset_btn = st.form_submit_button("Reset")
 
     if reset_btn:
-        st.session_state.do_reset=True
+        st.session_state.do_reset = True
         st.rerun()
 
-
 # ============================================================
-# Prediction logic
+# Prediction
 # ============================================================
 if predict_btn:
+    # validation
+    if not age_text.strip():
+        st.sidebar.error("Please enter Age.")
+        st.stop()
 
-    age_val=int(age_text)
-    exp_val=float(exp_text)
+    try:
+        age_val = int(float(age_text))
+    except Exception:
+        st.sidebar.error("Age must be a number.")
+        st.stop()
 
-    skills_selected=st.session_state.get("skills_selected",[])
-    skills_list=sorted(set([normalize_skill_name(s) for s in skills_selected]))
+    if age_val < 18:
+        st.sidebar.error("Age must be at least 18.")
+        st.stop()
 
-    row={
-        "Age":float(age_val),
-        "Years of Experience":float(exp_val),
-        "Gender":gender_sel,
-        "Education Level":edu_sel,
-        "Job Title":normalize_job_title(job_sel)
+    if gender_sel == "Select Gender":
+        st.sidebar.error("Please select Gender.")
+        st.stop()
+
+    if edu_sel == "Select Education":
+        st.sidebar.error("Please select Education.")
+        st.stop()
+
+    if job_sel == "Select Job Title":
+        st.sidebar.error("Please select Job Title.")
+        st.stop()
+
+    if not exp_text.strip():
+        st.sidebar.error("Please enter Years of Experience.")
+        st.stop()
+
+    try:
+        exp_val = float(exp_text)
+    except Exception:
+        st.sidebar.error("Years of Experience must be a number.")
+        st.stop()
+
+    if exp_val < 0:
+        st.sidebar.error("Years of Experience cannot be negative.")
+        st.stop()
+
+    # build row for model
+    skills_selected = st.session_state.get("skills_selected", [])
+    skills_list = sorted(set([normalize_skill_name(s) for s in skills_selected]))
+
+    row = {
+        "Age": float(age_val),
+        "Years of Experience": float(exp_val),
+        "Gender": gender_sel,
+        "Education Level": edu_sel,
+        "Job Title": normalize_job_title(job_sel),
     }
-
     for sc in skill_cols:
-        row[sc]=1 if sc in skills_list else 0
+        row[sc] = 1 if sc in skills_list else 0
 
-    X_user=pd.DataFrame([row])
-    pred=float(model.predict(X_user)[0])
+    X_user = pd.DataFrame([row])
+    pred = float(model.predict(X_user)[0])
 
-    low=max(0,pred-rmse)
-    high=pred+rmse
+    low, high = max(0.0, pred - rmse), pred + rmse
+    rate = float(usd_to_inr)
+    pred_inr = pred * rate
+    low_inr, high_inr = low * rate, high * rate
 
-    rate=float(usd_to_inr)
-    pred_inr=pred*rate
-    low_inr=low*rate
-    high_inr=high*rate
+    recognized = [s for s in skills_list if s in skill_cols]
+    ignored = [s for s in skills_list if s not in skill_cols]
 
-    st.success(f"Predicted Salary (USD): ${pred:,.0f}")
-    st.info(f"Range: ${low:,.0f} – ${high:,.0f}")
-
-    st.success(f"Predicted Salary (INR): ₹{pred_inr:,.0f}")
-    st.info(f"Range: ₹{low_inr:,.0f} – ₹{high_inr:,.0f}")
-
+    st.session_state.pred = pred
+    st.session_state.low = low
+    st.session_state.high = high
+    st.session_state.pred_inr = pred_inr
+    st.session_state.low_inr = low_inr
+    st.session_state.high_inr = high_inr
+    st.session_state.recognized = recognized
+    st.session_state.ignored = ignored
+    st.session_state.did_predict = True
 
 # ============================================================
-# Graphs
+# Layout
 # ============================================================
-if st.session_state.did_predict and df_model is not None:
-    st.pyplot(plot_salary_vs_experience(df_model))
+left, right = st.columns([1.6, 1])
 
-    st.pyplot(plot_avg_salary_by_role(df_model))
+with right:
+    st.markdown('<div class="panel"><h3>Prediction Result</h3><div class="small">KPI cards + prominent skills.</div></div>', unsafe_allow_html=True)
+
+    if not st.session_state.did_predict:
+        st.info("Enter inputs in the sidebar and click **Predict**.")
+    else:
+        pred = st.session_state.pred
+        low = st.session_state.low
+        high = st.session_state.high
+        pred_inr = st.session_state.pred_inr
+        low_inr = st.session_state.low_inr
+        high_inr = st.session_state.high_inr
+        recognized = st.session_state.recognized
+        ignored = st.session_state.ignored
+
+        r1, r2, r3 = st.columns(3)
+        with r1:
+            st.markdown(f"""<div class="kpi"><div class="label">Predicted Annual (USD)</div><div class="value">${pred:,.0f}</div></div>""", unsafe_allow_html=True)
+        with r2:
+            st.markdown(f"""<div class="kpi"><div class="label">Range (USD)</div><div class="value">${low:,.0f} – ${high:,.0f}</div></div>""", unsafe_allow_html=True)
+        with r3:
+            st.markdown(f"""<div class="kpi"><div class="label">Monthly (USD)</div><div class="value">${pred/12:,.0f}</div></div>""", unsafe_allow_html=True)
+
+        st.write("")
+
+        r4, r5, r6 = st.columns(3)
+        with r4:
+            st.markdown(f"""<div class="kpi"><div class="label">Approx Annual (INR)</div><div class="value">₹{pred_inr:,.0f}</div></div>""", unsafe_allow_html=True)
+        with r5:
+            st.markdown(f"""<div class="kpi"><div class="label">Range (INR)</div><div class="value">₹{low_inr:,.0f} – ₹{high_inr:,.0f}</div></div>""", unsafe_allow_html=True)
+        with r6:
+            st.markdown(f"""<div class="kpi"><div class="label">Monthly (INR)</div><div class="value">₹{pred_inr/12:,.0f}</div></div>""", unsafe_allow_html=True)
+
+        st.write("---")
+
+        ok_text = ", ".join(recognized) if recognized else "None"
+        st.markdown(f"""<div class="skillbox-ok"><h4>✅ Recognized Skills</h4>{ok_text}</div>""", unsafe_allow_html=True)
+
+        st.write("")
+
+        bad_text = ", ".join(ignored) if ignored else "None"
+        st.markdown(f"""<div class="skillbox-warn"><h4>⚠️ Ignored Skills</h4>{bad_text}</div>""", unsafe_allow_html=True)
+
+with left:
+    st.markdown('<div class="panel"><h3>Analytics & Visualizations</h3><div class="small">Graphs appear only after prediction.</div></div>', unsafe_allow_html=True)
+
+    if not st.session_state.did_predict:
+        st.info("Make a prediction to unlock graphs.")
+    else:
+        tabs = st.tabs(["Market Trends", "Interpretability", "Model Comparison"])
+
+        with tabs[0]:
+            if df_model is None:
+                st.warning("Add df_model.csv in repo to show trend graphs.")
+            else:
+                # Safety check for expected columns
+                needed_cols = {"Years of Experience", "Salary", "Job Title"}
+                if not needed_cols.issubset(set(df_model.columns)):
+                    st.error(f"df_model.csv must contain columns: {sorted(list(needed_cols))}. "
+                             f"Current columns: {list(df_model.columns)}")
+                else:
+                    st.pyplot(plot_salary_vs_experience(df_model))
+                    st.pyplot(plot_avg_salary_by_role(df_model, top_n=10))
+
+        with tabs[1]:
+            st.pyplot(plot_feature_importance(model, top_n=15))
+
+        with tabs[2]:
+            st.pyplot(plot_model_comparison(results_df))
+
 
